@@ -245,7 +245,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
-        triggerPattern.test(m.content.trim()) &&
+        (triggerPattern.test(m.content.trim()) ||
+          m.reply_to_sender_name?.toLowerCase() ===
+            ASSISTANT_NAME.toLowerCase()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
@@ -495,7 +497,9 @@ async function startMessageLoop(): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                triggerPattern.test(m.content.trim()) &&
+                (triggerPattern.test(m.content.trim()) ||
+                  m.reply_to_sender_name?.toLowerCase() ===
+                    ASSISTANT_NAME.toLowerCase()) &&
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );

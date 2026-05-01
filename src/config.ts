@@ -78,7 +78,12 @@ export const DEFAULT_TRIGGER = `@${ASSISTANT_NAME}`;
 
 export function getTriggerPattern(trigger?: string): RegExp {
   const normalizedTrigger = trigger?.trim();
-  return buildTriggerPattern(normalizedTrigger || DEFAULT_TRIGGER);
+  const t = normalizedTrigger || DEFAULT_TRIGGER;
+  // Pipe-separated string → treat as raw regex alternation, match anywhere in message
+  if (t.includes('|')) {
+    return new RegExp(t, 'i');
+  }
+  return buildTriggerPattern(t);
 }
 
 export const TRIGGER_PATTERN = buildTriggerPattern(DEFAULT_TRIGGER);
