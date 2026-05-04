@@ -240,30 +240,38 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (missedMessages.length === 0) return true;
 
   // For non-main groups, check if trigger is required and present
+  let replyThreadId: string | undefined;
   if (!isMainGroup && group.requiresTrigger !== false) {
     const triggerPattern = getTriggerPattern(group.trigger);
     const allowlistCfg = loadSenderAllowlist();
-    const hasTrigger = missedMessages.some(
+    const triggerMsg = missedMessages.find(
       (m) =>
         (triggerPattern.test(m.content.trim()) ||
           m.reply_to_sender_name?.toLowerCase() ===
             ASSISTANT_NAME.toLowerCase()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
-    if (!hasTrigger) return true;
+    if (!triggerMsg) return true;
+    replyThreadId = triggerMsg.thread_id;
   }
 
-  const prompt = formatMessages(missedMessages, TIMEZONE);
+  // Restrict context to the trigger's topic to prevent cross-topic leakage.
+  // Groups without topics (thread_id undefined) are unaffected.
+  const contextMessages = replyThreadId
+    ? missedMessages.filter((m) => m.thread_id === replyThreadId)
+    : missedMessages;
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
+  const prompt = formatMessages(contextMessages, TIMEZONE);
+
+  // Advance cursor on all missed messages (not just context) so other topics
+  // aren't re-fetched unnecessarily on the next run.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    { group: group.name, messageCount: contextMessages.length },
     'Processing messages',
   );
 
@@ -296,7 +304,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        await channel.sendMessage(chatJid, text, replyThreadId);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -492,10 +500,11 @@ async function startMessageLoop(): Promise<void> {
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
+          let pipeThreadId: string | undefined;
           if (needsTrigger) {
             const triggerPattern = getTriggerPattern(group.trigger);
             const allowlistCfg = loadSenderAllowlist();
-            const hasTrigger = groupMessages.some(
+            const triggerMsg = groupMessages.find(
               (m) =>
                 (triggerPattern.test(m.content.trim()) ||
                   m.reply_to_sender_name?.toLowerCase() ===
@@ -503,19 +512,24 @@ async function startMessageLoop(): Promise<void> {
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
-            if (!hasTrigger) continue;
+            if (!triggerMsg) continue;
+            pipeThreadId = triggerMsg.thread_id;
           }
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
+          // Restrict to the trigger's topic to prevent cross-topic leakage.
           const allPending = getMessagesSince(
             chatJid,
             getOrRecoverCursor(chatJid),
             ASSISTANT_NAME,
             MAX_MESSAGES_PER_PROMPT,
           );
+          const filteredPending = pipeThreadId
+            ? allPending.filter((m) => m.thread_id === pipeThreadId)
+            : allPending;
           const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
+            filteredPending.length > 0 ? filteredPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
