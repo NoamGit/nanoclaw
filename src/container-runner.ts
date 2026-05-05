@@ -300,8 +300,14 @@ async function buildContainerArgs(
       // Rootless Docker can't route to host.docker.internal; use the OneCLI
       // container's hostname directly on its Docker network instead.
       for (let i = 0; i < args.length; i++) {
-        if (args[i] === '-e' && args[i + 1]?.includes('host.docker.internal:10255')) {
-          args[i + 1] = args[i + 1].replace(/host\.docker\.internal:10255/g, 'onecli:10255');
+        if (
+          args[i] === '-e' &&
+          args[i + 1]?.includes('host.docker.internal:10255')
+        ) {
+          args[i + 1] = args[i + 1].replace(
+            /host\.docker\.internal:10255/g,
+            'onecli:10255',
+          );
         }
       }
       args.push('--network', 'onecli_onecli');
@@ -326,7 +332,12 @@ async function buildContainerArgs(
   // the container's user namespace, so adding --user would map to a wrong uid.
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
-  if (!IS_ROOTLESS_DOCKER && hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+  if (
+    !IS_ROOTLESS_DOCKER &&
+    hostUid != null &&
+    hostUid !== 0 &&
+    hostUid !== 1000
+  ) {
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }

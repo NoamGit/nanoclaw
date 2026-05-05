@@ -464,7 +464,9 @@ describe('getMessagesSince', () => {
 
     expect(context).toHaveLength(2);
     expect(context.every((m) => m.thread_id === '42')).toBe(true);
-    expect(context.find((m) => m.content === 'topic B message')).toBeUndefined();
+    expect(
+      context.find((m) => m.content === 'topic B message'),
+    ).toBeUndefined();
   });
 });
 
