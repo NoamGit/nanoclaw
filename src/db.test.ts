@@ -393,6 +393,81 @@ describe('getMessagesSince', () => {
     );
     expect(msgs).toHaveLength(0);
   });
+
+  it('persists and returns thread_id for topic messages', () => {
+    storeChatMetadata('forum@g.us', '2024-01-01T00:00:00.000Z');
+    storeMessage({
+      id: 't1',
+      chat_jid: 'forum@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'topic message',
+      timestamp: '2024-01-01T00:01:00.000Z',
+      thread_id: '42',
+    });
+    storeMessage({
+      id: 't2',
+      chat_jid: 'forum@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'no topic message',
+      timestamp: '2024-01-01T00:02:00.000Z',
+    });
+
+    const msgs = getMessagesSince('forum@g.us', '', 'Andy');
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0].thread_id).toBe('42');
+    expect(msgs[1].thread_id).toBeFalsy();
+  });
+
+  it('in-memory topic filter restricts context to the trigger topic', () => {
+    storeChatMetadata('forum@g.us', '2024-01-01T00:00:00.000Z');
+    // Topic 42: two messages
+    storeMessage({
+      id: 'a1',
+      chat_jid: 'forum@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'topic A first',
+      timestamp: '2024-01-01T00:01:00.000Z',
+      thread_id: '42',
+    });
+    storeMessage({
+      id: 'a2',
+      chat_jid: 'forum@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'topic A trigger @baz',
+      timestamp: '2024-01-01T00:02:00.000Z',
+      thread_id: '42',
+    });
+    // Topic 99: one message (different topic, should be excluded)
+    storeMessage({
+      id: 'b1',
+      chat_jid: 'forum@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'topic B message',
+      timestamp: '2024-01-01T00:03:00.000Z',
+      thread_id: '99',
+    });
+
+    const all = getMessagesSince('forum@g.us', '', 'Andy');
+    expect(all).toHaveLength(3);
+
+    // Simulate processGroupMessages: trigger came from topic 42
+    const triggerMsg = all.find((m) => m.content.includes('@baz'));
+    const replyThreadId = triggerMsg?.thread_id;
+    const context = replyThreadId
+      ? all.filter((m) => m.thread_id === replyThreadId)
+      : all;
+
+    expect(context).toHaveLength(2);
+    expect(context.every((m) => m.thread_id === '42')).toBe(true);
+    expect(
+      context.find((m) => m.content === 'topic B message'),
+    ).toBeUndefined();
+  });
 });
 
 // --- getNewMessages ---

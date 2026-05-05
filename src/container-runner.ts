@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -30,6 +30,21 @@ import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL, apiKey: ONECLI_API_KEY });
+
+// Rootless Docker: host uid maps to container uid=0. Detect once at startup.
+// In rootless mode we skip --user (containers already run as the host user
+// mapped to uid=0) and join the onecli network for proxy reachability.
+const IS_ROOTLESS_DOCKER =
+  CONTAINER_RUNTIME_BIN === 'docker' &&
+  (() => {
+    try {
+      return execSync('docker info 2>/dev/null')
+        .toString()
+        .includes('rootless');
+    } catch {
+      return false;
+    }
+  })();
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -144,6 +159,10 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // In rootless Docker the container runs as node (uid=1000) which maps to a
+  // subuid on the host, but the directory is owned by the host process uid.
+  // Without 0o777 the node user lands in "other" (r-x) and can't write.
+  fs.chmodSync(groupSessionsDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
@@ -188,9 +207,13 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  for (const sub of ['messages', 'tasks', 'input']) {
+    const d = path.join(groupIpcDir, sub);
+    fs.mkdirSync(d, { recursive: true });
+    // World-writable so rootless Docker containers (uid=0 inside, uid=1002 outside)
+    // can delete IPC files they did not create.
+    fs.chmodSync(d, 0o1777);
+  }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -253,6 +276,18 @@ async function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Route container HTTP(S) traffic through Squid egress allowlist.
+  // nanoclaw-squid is a container on the onecli_onecli network (host Squid
+  // is unreachable from rootless Docker containers via the bridge gateway).
+  // NO_PROXY excludes OneCLI's in-network credential proxy (onecli:10255).
+  const SQUID_PROXY = 'http://nanoclaw-squid:3128';
+  args.push('-e', `HTTP_PROXY=${SQUID_PROXY}`);
+  args.push('-e', `HTTPS_PROXY=${SQUID_PROXY}`);
+  args.push('-e', `http_proxy=${SQUID_PROXY}`);
+  args.push('-e', `https_proxy=${SQUID_PROXY}`);
+  args.push('-e', 'NO_PROXY=localhost,127.0.0.1,onecli,bank-mcp-server');
+  args.push('-e', 'no_proxy=localhost,127.0.0.1,onecli,bank-mcp-server');
+
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
   const onecliApplied = await onecli.applyContainerConfig(args, {
@@ -261,6 +296,22 @@ async function buildContainerArgs(
   });
   if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
+    if (IS_ROOTLESS_DOCKER) {
+      // Rootless Docker can't route to host.docker.internal; use the OneCLI
+      // container's hostname directly on its Docker network instead.
+      for (let i = 0; i < args.length; i++) {
+        if (
+          args[i] === '-e' &&
+          args[i + 1]?.includes('host.docker.internal:10255')
+        ) {
+          args[i + 1] = args[i + 1].replace(
+            /host\.docker\.internal:10255/g,
+            'onecli:10255',
+          );
+        }
+      }
+      args.push('--network', 'onecli_onecli');
+    }
   } else {
     logger.warn(
       { containerName },
@@ -274,9 +325,19 @@ async function buildContainerArgs(
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).
+  // Run as host user so bind-mounted files are accessible.
+  // Skip when running as root (uid 0), as the container's node user (uid 1000),
+  // or when getuid is unavailable (native Windows without WSL).
+  // Also skip for rootless Docker: the host uid already maps to uid=0 inside
+  // the container's user namespace, so adding --user would map to a wrong uid.
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+  if (
+    !IS_ROOTLESS_DOCKER &&
+    hostUid != null &&
+    hostUid !== 0 &&
+    hostUid !== 1000
+  ) {
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
