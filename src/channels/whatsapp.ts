@@ -549,4 +549,9 @@ export class WhatsAppChannel implements Channel {
   }
 }
 
-registerChannel('whatsapp', (opts: ChannelOpts) => new WhatsAppChannel(opts));
+registerChannel('whatsapp', (opts: ChannelOpts) => {
+  const authDir = path.join(STORE_DIR, 'auth');
+  if (!fs.existsSync(authDir) || fs.readdirSync(authDir).length === 0)
+    return null;
+  return new WhatsAppChannel(opts);
+});
