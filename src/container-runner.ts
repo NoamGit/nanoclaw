@@ -196,7 +196,10 @@ function buildVolumeMounts(
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
+      // force:false skips files already in destination — container agents may
+      // update skill files (e.g. SKILL.md), and those would be unwritable by
+      // the host process since they're owned by the container's mapped UID.
+      fs.cpSync(srcDir, dstDir, { recursive: true, force: false });
     }
   }
   mounts.push({
