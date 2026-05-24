@@ -83,7 +83,8 @@ async function main(): Promise<void> {
 
   for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
     mcpServers[name] = serverConfig;
-    log(`Additional MCP server: ${name} (${serverConfig.command})`);
+    const desc = 'command' in serverConfig ? serverConfig.command : `http:${serverConfig.url}`;
+    log(`Additional MCP server: ${name} (${desc})`);
   }
 
   const provider = createProvider(providerName, {

@@ -135,11 +135,17 @@ export function resolveSession(
 /** Create the session folder and initialize both DBs. */
 export function initSessionFolder(agentGroupId: string, sessionId: string): void {
   const dir = sessionDir(agentGroupId, sessionId);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.mkdirSync(path.join(dir, 'outbox'), { recursive: true });
+  // 0o777: container writes journal files alongside the DBs; rootless Docker maps
+  // the container's node user to a different host UID, so world-write is required.
+  fs.mkdirSync(dir, { recursive: true, mode: 0o777 });
+  fs.chmodSync(dir, 0o777); // recursive:true doesn't override existing dirs
+  fs.mkdirSync(path.join(dir, 'outbox'), { recursive: true, mode: 0o777 });
 
   ensureSchema(inboundDbPath(agentGroupId, sessionId), 'inbound');
   ensureSchema(outboundDbPath(agentGroupId, sessionId), 'outbound');
+  // outbound.db is written by the container (runs as `node`, not root).
+  // Without 0o666 the container's node user gets SQLITE_READONLY under rootless Docker.
+  fs.chmodSync(outboundDbPath(agentGroupId, sessionId), 0o666);
 }
 
 /**

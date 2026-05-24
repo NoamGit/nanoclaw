@@ -424,13 +424,53 @@ async function buildContainerArgs(
   // The caller (router or host-sweep) catches the throw, leaves the inbound
   // message pending, and the next sweep tick retries.
   if (agentIdentifier) {
-    await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
+    const ensureResult = await onecli.ensureAgent({ name: agentGroup.name, identifier: agentIdentifier });
+    if (ensureResult.created) {
+      // New agents start in "selective" mode with no secrets. Flip to "all" so
+      // every vault secret with a matching host pattern is injected.
+      try {
+        const agentsRes = await fetch(`${ONECLI_URL}/api/agents`, {
+          headers: ONECLI_API_KEY ? { Authorization: `Bearer ${ONECLI_API_KEY}` } : {},
+        });
+        const agents = (await agentsRes.json()) as Array<{ id: string; identifier?: string }>;
+        const agent = agents.find((a) => a.identifier === agentIdentifier);
+        if (agent) {
+          await fetch(`${ONECLI_URL}/api/agents/${agent.id}/secret-mode`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(ONECLI_API_KEY ? { Authorization: `Bearer ${ONECLI_API_KEY}` } : {}),
+            },
+            body: JSON.stringify({ mode: 'all' }),
+          });
+          log.info('OneCLI agent secret mode set to all', { agentGroupId: agentGroup.id });
+        }
+      } catch (err) {
+        log.warn('Failed to set OneCLI agent secret mode — agent may need manual configuration', {
+          agentGroupId: agentGroup.id,
+          error: String(err),
+        });
+      }
+    }
   }
   const onecliApplied = await onecli.applyContainerConfig(args, { addHostMapping: false, agent: agentIdentifier });
   if (!onecliApplied) {
     throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
   }
   log.info('OneCLI gateway applied', { containerName });
+
+  // In rootless Docker, port bindings on the bridge address (172.17.0.1) are
+  // not reachable from inside containers. Rewrite the OneCLI proxy URL from
+  // host.docker.internal:10255 → onecli:10255 (the OneCLI container's service
+  // name, resolvable via Docker DNS on the shared network).
+  for (let i = 0; i < args.length; i++) {
+    if (typeof args[i] === 'string' && args[i].includes('host.docker.internal:10255')) {
+      args[i] = args[i].replace(/host\.docker\.internal:10255/g, 'onecli:10255');
+    }
+  }
+  // Join nanoclaw containers to the OneCLI Docker network so they can
+  // resolve and reach the `onecli` service hostname.
+  args.push('--network', 'onecli_onecli');
 
   // Host gateway
   args.push(...hostGatewayArgs());
