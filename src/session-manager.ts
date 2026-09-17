@@ -139,7 +139,9 @@ export function initSessionFolder(agentGroupId: string, sessionId: string): void
   // the container's node user to a different host UID, so world-write is required.
   fs.mkdirSync(dir, { recursive: true, mode: 0o777 });
   fs.chmodSync(dir, 0o777); // recursive:true doesn't override existing dirs
-  fs.mkdirSync(path.join(dir, 'outbox'), { recursive: true, mode: 0o777 });
+  const outboxDir = path.join(dir, 'outbox');
+  fs.mkdirSync(outboxDir, { recursive: true, mode: 0o777 });
+  fs.chmodSync(outboxDir, 0o777); // mkdirSync's mode is masked by umask; force world-write for the same reason as `dir` above
 
   ensureSchema(inboundDbPath(agentGroupId, sessionId), 'inbound');
   ensureSchema(outboundDbPath(agentGroupId, sessionId), 'outbound');
