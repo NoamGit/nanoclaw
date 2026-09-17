@@ -328,6 +328,10 @@ const CLAUDE_CODE_AUTO_COMPACT_WINDOW = process.env.CLAUDE_CODE_AUTO_COMPACT_WIN
  */
 const STALE_SESSION_RE = /no conversation found|ENOENT.*\.jsonl|session.*not found/i;
 
+// pnpm 11 moved global bin from /pnpm to /pnpm/bin. Try the new location first
+// so a pnpm bump doesn't silently reintroduce "native binary not found".
+const CLAUDE_EXECUTABLE = fs.existsSync('/pnpm/bin/claude') ? '/pnpm/bin/claude' : '/pnpm/claude';
+
 export class ClaudeProvider implements AgentProvider {
   readonly supportsNativeSlashCommands = true;
 
@@ -353,6 +357,18 @@ export class ClaudeProvider implements AgentProvider {
   isSessionInvalid(err: unknown): boolean {
     const msg = err instanceof Error ? err.message : String(err);
     return STALE_SESSION_RE.test(msg);
+  }
+
+  /**
+   * Check whether the transcript file for this continuation actually exists
+   * on disk before attempting a resume. Claude Code stores transcripts at
+   * ~/.claude/projects/<sanitized-cwd>/<session-id>.jsonl — if the file is
+   * missing, the resume will fail with "No conversation found" anyway.
+   */
+  isContinuationValid(continuation: string, cwd: string): boolean {
+    const sanitizedCwd = cwd.replace(/\//g, '-');
+    const transcriptPath = path.join(os.homedir(), '.claude', 'projects', sanitizedCwd, `${continuation}.jsonl`);
+    return fs.existsSync(transcriptPath);
   }
 
   maybeRotateContinuation(continuation: string): string | null {
@@ -402,7 +418,7 @@ export class ClaudeProvider implements AgentProvider {
         cwd: input.cwd,
         additionalDirectories: this.additionalDirectories,
         resume: input.continuation,
-        pathToClaudeCodeExecutable: '/pnpm/claude',
+        pathToClaudeCodeExecutable: CLAUDE_EXECUTABLE,
         systemPrompt: instructions ? { type: 'preset' as const, preset: 'claude_code' as const, append: instructions } : undefined,
         allowedTools: [
           ...TOOL_ALLOWLIST,

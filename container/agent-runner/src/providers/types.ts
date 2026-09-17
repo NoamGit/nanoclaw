@@ -16,6 +16,13 @@ export interface AgentProvider {
   isSessionInvalid(err: unknown): boolean;
 
   /**
+   * Optional upfront check: return false if the stored continuation is known
+   * to be unusable before even attempting a query (e.g. the transcript file
+   * is already missing on disk). If absent, the continuation is assumed valid.
+   */
+  isContinuationValid?(continuation: string, cwd: string): boolean;
+
+  /**
    * Optional pre-resume maintenance. Given the stored continuation token,
    * decide whether its backing transcript has grown too large or too old to
    * resume cheaply. Return a non-null reason string to tell the caller to drop

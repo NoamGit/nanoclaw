@@ -95,7 +95,15 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     }
   }
 
-  if (continuation) {
+  // Validate before the first query: if the transcript file is already
+  // missing, clear now instead of discovering it mid-call. This is the
+  // common case after a rebuild or cross-version migration where the
+  // .claude-shared/projects/ directory was wiped or never populated.
+  if (continuation && config.provider.isContinuationValid && !config.provider.isContinuationValid(continuation, config.cwd)) {
+    log(`Continuation ${continuation} has no transcript on disk — clearing before first query`);
+    continuation = undefined;
+    clearContinuation(config.providerName);
+  } else if (continuation) {
     log(`Resuming agent session ${continuation}`);
   }
 
@@ -227,24 +235,56 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       const errMsg = err instanceof Error ? err.message : String(err);
       log(`Query error: ${errMsg}`);
 
-      // Stale/corrupt continuation recovery: ask the provider whether
-      // this error means the stored continuation is unusable, and clear
-      // it so the next attempt starts fresh.
+      // Stale/corrupt continuation recovery: clear the stored session id and
+      // retry immediately without it so the user gets a response instead of an
+      // error. The transcript file lives in the container filesystem and
+      // disappears on every container restart, making this the normal path
+      // after any rebuild or crash.
+      let handled = false;
       if (continuation && config.provider.isSessionInvalid(err)) {
-        log(`Stale session detected (${continuation}) — clearing for next retry`);
+        log(`Stale session detected (${continuation}) — retrying without continuation`);
         continuation = undefined;
         clearContinuation(config.providerName);
+
+        try {
+          const retryQuery = config.provider.query({
+            prompt,
+            continuation: undefined,
+            cwd: config.cwd,
+            systemContext: config.systemContext,
+          });
+          const retryResult = await processQuery(retryQuery, routing, processingIds, config.providerName);
+          if (retryResult.continuation) {
+            continuation = retryResult.continuation;
+            setContinuation(config.providerName, continuation);
+          }
+          handled = true;
+        } catch (retryErr) {
+          const retryErrMsg = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          log(`Retry after stale session also failed: ${retryErrMsg}`);
+          writeMessageOut({
+            id: generateId(),
+            kind: 'chat',
+            platform_id: routing.platformId,
+            channel_type: routing.channelType,
+            thread_id: routing.threadId,
+            content: JSON.stringify({ text: `Error: ${retryErrMsg}` }),
+          });
+          handled = true;
+        }
       }
 
-      // Write error response so the user knows something went wrong
-      writeMessageOut({
-        id: generateId(),
-        kind: 'chat',
-        platform_id: routing.platformId,
-        channel_type: routing.channelType,
-        thread_id: routing.threadId,
-        content: JSON.stringify({ text: `Error: ${errMsg}` }),
-      });
+      if (!handled) {
+        // Write error response so the user knows something went wrong
+        writeMessageOut({
+          id: generateId(),
+          kind: 'chat',
+          platform_id: routing.platformId,
+          channel_type: routing.channelType,
+          thread_id: routing.threadId,
+          content: JSON.stringify({ text: `Error: ${errMsg}` }),
+        });
+      }
     } finally {
       clearCurrentInReplyTo();
     }
