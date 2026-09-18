@@ -111,8 +111,13 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
+# zod@^3.25 pinned explicitly: without it, pnpm's shared global store resolves
+# zod to whatever an earlier global install (claude-code) already pinned
+# (3.24.4), and @gongrzhe/server-gmail-autoauth-mcp's zod-to-json-schema@3.25.2
+# dependency needs zod's `./v3` export subpath, which 3.24.4 doesn't define —
+# the MCP server crashes at startup with ERR_PACKAGE_PATH_NOT_EXPORTED.
 RUN --mount=type=cache,target=/root/.cache/pnpm \
-    pnpm install -g "@gongrzhe/server-gmail-autoauth-mcp@${GMAIL_MCP_VERSION}"
+    pnpm install -g "@gongrzhe/server-gmail-autoauth-mcp@${GMAIL_MCP_VERSION}" "zod@^3.25"
 
 # ---- Gmail MCP credentials symlink -------------------------------------------
 # The gmail MCP looks for credentials at $HOME/.gmail-mcp. We bind-mount the
