@@ -10,7 +10,9 @@ set -uo pipefail
 . "$(dirname "$(readlink -f "$0")")/lib.sh"
 
 MODE="${1:-status}"; DRY=0; [ "${2:-}" = "--dry-run" ] && DRY=1
-WARN_PCT=85; CRIT_PCT=90
+WARN_PCT="${WARN_PCT:-90}"; CRIT_PCT="${CRIT_PCT:-95}"     # override in ops.env
+ALERT_COOLDOWN_H="${ALERT_COOLDOWN_H:-6}"; ALERT_MIN_FREED_MB="${ALERT_MIN_FREED_MB:-1024}"
+ALERT_STATE="$BACKUP_DIR/.last-disk-alert"
 KEEP_CACHE="2GB"
 BACKUP_STATUS="$BACKUP_STATUS_FILE"
 LOGDIR="$NANOCLAW_HOME/logs"
@@ -20,8 +22,12 @@ run() { if [ $DRY -eq 1 ]; then log "DRY: $*"; else log "RUN: $*"; "$@" 2>&1 | s
 used_pct() { df --output=pcent / | tail -1 | tr -dc '0-9'; }
 free_h() { df -h --output=avail / | tail -1 | tr -d ' '; }
 
-alert() {
+alert() {  # throttled: at most one Telegram message per ALERT_COOLDOWN_H
   log "ALERT: $*"
+  if [ -r "$ALERT_STATE" ] && [ $(( $(date +%s) - $(cat "$ALERT_STATE") )) -lt $(( ALERT_COOLDOWN_H * 3600 )) ]; then
+    log "alert suppressed (cooldown ${ALERT_COOLDOWN_H}h)"; return 0
+  fi
+  [ $DRY -eq 1 ] || date +%s > "$ALERT_STATE"
   [ -r "$ALERT_ENV" ] || return 0
   # shellcheck disable=SC1090
   . "$ALERT_ENV"
@@ -88,16 +94,21 @@ case "$MODE" in
     p=$(used_pct)
     [ "$p" -ge "$WARN_PCT" ] || exit 0
     log "watchdog: / at ${p}% — emergency prune"
+    avail_before=$(df --output=avail -k / | tail -1 | tr -dc '0-9')
     run docker builder prune -af
     run docker image prune -f
     run docker container prune -f --filter until=48h
     run npm cache clean --force
     run uv cache prune
+    avail_after=$(df --output=avail -k / | tail -1 | tr -dc '0-9')
     p2=$(used_pct)
+    freed_mb=$(( (avail_after - avail_before) / 1024 ))
     if [ "$p2" -ge "$CRIT_PCT" ]; then
       alert "CRITICAL: / still at ${p2}% after auto-prune (${p}% before), $(free_h) free. Manual action needed (snaps, journal, old VMs)."
+    elif [ "$freed_mb" -ge "$ALERT_MIN_FREED_MB" ]; then
+      alert "/ was ${p}%, auto-pruned to ${p2}% (freed ${freed_mb}MB, $(free_h) free)."
     else
-      alert "/ was ${p}%, auto-pruned to ${p2}% ($(free_h) free)."
+      log "watchdog: prune freed ${freed_mb}MB, / at ${p2}% — below alert threshold, no message"
     fi
     ;;
   *) echo "usage: $0 {status|daily|weekly|watchdog} [--dry-run]"; exit 2 ;;
