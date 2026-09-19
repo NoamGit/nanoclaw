@@ -23,6 +23,7 @@ ARG CLAUDE_CODE_VERSION=2.1.128
 ARG AGENT_BROWSER_VERSION=latest
 ARG VERCEL_VERSION=52.2.1
 ARG GMAIL_MCP_VERSION=1.1.11
+ARG CALENDAR_MCP_VERSION=2.6.1
 ARG BUN_VERSION=1.3.12
 
 # ---- System dependencies -----------------------------------------------------
@@ -118,6 +119,11 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 # the MCP server crashes at startup with ERR_PACKAGE_PATH_NOT_EXPORTED.
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@gongrzhe/server-gmail-autoauth-mcp@${GMAIL_MCP_VERSION}" "zod@^3.25"
+
+# Google Calendar MCP (multi-calendar). Separate install so its zod@4 dependency
+# stays isolated from the zod@^3.25 pin the gmail MCP needs above.
+RUN --mount=type=cache,target=/root/.cache/pnpm \
+    pnpm install -g "@cocal/google-calendar-mcp@${CALENDAR_MCP_VERSION}"
 
 # ---- Gmail MCP credentials symlink -------------------------------------------
 # The gmail MCP looks for credentials at $HOME/.gmail-mcp. We bind-mount the
