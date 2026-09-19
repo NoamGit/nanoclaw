@@ -1,0 +1,58 @@
+#!/bin/bash
+# baz — control CLI for NanoClaw (run as the nanoclaw user)
+set -uo pipefail
+
+. "$(dirname "$(readlink -f "$0")")/lib.sh"
+V2="$NANOCLAW_HOME"
+BIN="$OPS_DIR"
+PIDFILE="$V2/nanoclaw.pid"
+
+usage() {
+  cat <<'EOF'
+baz — NanoClaw control
+
+  baz start                    restart NanoClaw (stop old instance, apply MCP wiring, start fresh)
+  baz down                     stop NanoClaw (Docker/OneCLI services keep running)
+  baz recover                  full recovery after a power cut/reboot (Docker, OneCLI, bank-mcp, squid, NanoClaw, health)
+  baz backup [--dry-run]       back up memory, conversations and session DBs (verified archive)
+  baz cleanup [mode] [--dry-run]
+                               mode: status (default) | daily | weekly | watchdog
+
+  baz status                   is NanoClaw up? containers, disk, last backup
+  baz health                   Gmail / Calendar / Drive MCP health check
+  baz logs [-e]                follow logs (-e for the error log)
+  baz wiring                   preview MCP wiring changes (dry run)
+  baz help
+EOF
+}
+
+pid_alive() { [ -r "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  start)   exec bash "$V2/start-nanoclaw.sh" "$@" ;;
+  recover) exec bash "$BIN/recover-after-shutdown.sh" "$@" ;;
+  backup)  exec "$BIN/backup-nanoclaw-v2.sh" "$@" ;;
+  cleanup)
+    mode="${1:-status}"; [ $# -gt 0 ] && shift
+    exec "$BIN/nanoclaw-cleanup.sh" "$mode" "$@" ;;
+  down)
+    if pid_alive; then
+      pid=$(cat "$PIDFILE"); kill "$pid"
+      for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+      if kill -0 "$pid" 2>/dev/null; then echo "still running (pid $pid) — try: kill -9 $pid"; exit 1; fi
+      echo "NanoClaw stopped (was pid $pid)"
+    else
+      echo "NanoClaw is not running"
+    fi ;;
+  status)
+    if pid_alive; then echo "NanoClaw: running (pid $(cat "$PIDFILE"))"; else echo "NanoClaw: NOT running"; fi
+    echo; docker ps --format 'table {{.Names}}\t{{.Status}}'
+    echo; exec "$BIN/nanoclaw-cleanup.sh" status 2>&1 | grep -E 'used:|last v2 backup' ;;
+  health)  exec python3 "$V2/ops/mcp-health.py" "$@" ;;
+  logs)
+    if [ "${1:-}" = "-e" ]; then exec tail -f "$V2/logs/nanoclaw.error.log"; else exec tail -f "$V2/logs/nanoclaw.log"; fi ;;
+  wiring)  cd "$V2" && exec pnpm exec tsx ops/apply-mcp-wiring.ts --dry-run ;;
+  help|-h|--help) usage ;;
+  *) echo "baz: unknown command '$cmd'" >&2; usage >&2; exit 2 ;;
+esac

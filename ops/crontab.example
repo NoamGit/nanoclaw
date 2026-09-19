@@ -1,0 +1,5 @@
+# Suggested crontab for the nanoclaw user (adjust paths). DOCKER_HOST is set by ops/lib.sh.
+0 3 * * *   /home/nanoclaw/bin/baz backup          >> /home/nanoclaw/backups/backup.log  2>&1
+30 4 * * *  /home/nanoclaw/bin/baz cleanup daily    >> /home/nanoclaw/backups/cleanup.log 2>&1
+45 4 * * 0  /home/nanoclaw/bin/baz cleanup weekly   >> /home/nanoclaw/backups/cleanup.log 2>&1
+15 * * * *  /home/nanoclaw/bin/baz cleanup watchdog >> /home/nanoclaw/backups/cleanup.log 2>&1
