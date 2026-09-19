@@ -4,8 +4,11 @@
 #
 #   recover-after-shutdown.sh            full recovery
 #   recover-after-shutdown.sh --check    READ-ONLY diagnosis: changes nothing, exit 0 = healthy
-#   recover-after-shutdown.sh --ensure   cheap watchdog mode: exit 0 quietly if NanoClaw is
-#                                        running, otherwise run the full recovery (for cron)
+#   recover-after-shutdown.sh --ensure   watchdog mode for cron: exit 0 quietly if NanoClaw is
+#                                        running, otherwise run the full recovery, then send a
+#                                        Telegram alert (restarted / restart FAILED). Guarded by a
+#                                        lock (no overlapping runs) and a crash-loop limit (at most
+#                                        3 auto-recoveries per 30 min, then it alerts and backs off).
 #
 # Canonical copy lives in the repo (ops/); /home/nanoclaw/bin/recover-after-shutdown.sh is a symlink.
 # Exit: 0 = everything healthy, 1 = finished but with warnings (or aborted), 2 = bad usage.
@@ -22,6 +25,8 @@ export PATH="/home/nanoclaw/bin:/home/nanoclaw/.local/bin:/home/nanoclaw/.nvm/ve
 ONECLI_URL="${ONECLI_URL:-http://172.17.0.1:10254}"
 BACKUP_STATUS="/home/nanoclaw/backups/.last-backup-v2-ok"
 DISK_WARN_PCT=85
+ALERT_ENV="${NANOCLAW_ALERT_ENV:-/home/nanoclaw/.config/nanoclaw/alert.env}"
+MAX_AUTO_RECOVERIES=3   # per 30 minutes, --ensure mode only
 
 MODE=recover
 case "${1:-}" in
@@ -40,6 +45,16 @@ act()  { local d="$1"; shift; if [ "$MODE" = check ]; then echo "  (check) would
 # wait_for <timeout-seconds> <cmd...> : poll until cmd succeeds
 wait_for() { local t="$1" i; shift; for ((i = 0; i < t; i += 2)); do "$@" >/dev/null 2>&1 && return 0; sleep 2; done; return 1; }
 
+# Telegram alert (same channel as nanoclaw-cleanup.sh). Never fails the caller.
+alert() {
+  echo "  ALERT: $*"
+  [ -r "$ALERT_ENV" ] || return 0
+  ( . "$ALERT_ENV"
+    [ -n "${TG_BOT_TOKEN:-}" ] && [ -n "${TG_CHAT_ID:-}" ] || exit 0
+    curl -s -m 15 "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+      -d chat_id="$TG_CHAT_ID" --data-urlencode text="nanoclaw watchdog: $*" >/dev/null ) || true
+}
+
 nanoclaw_pids() {  # host instances running from this checkout (hand-started or via start-nanoclaw.sh)
   local p
   for p in $(pgrep -x node 2>/dev/null || true); do
@@ -53,8 +68,42 @@ if [ "$MODE" = ensure ] && [ -n "$(nanoclaw_pids)" ]; then
 fi
 if [ "$MODE" != check ]; then
   mkdir -p "$NC/logs"
+  # One recovery at a time: a full run can outlast the next 5-minute cron tick.
+  exec 9>"$NC/logs/.recovery.lock"
+  if ! flock -n 9; then
+    [ "$MODE" = ensure ] && exit 0
+    echo "Another recovery run is already in progress (lock: $NC/logs/.recovery.lock)." >&2
+    exit 1
+  fi
   exec > >(tee -a "$NC/logs/recovery.log") 2>&1
   echo; echo "##### recovery run $(date '+%F %T') (mode: $MODE) #####"
+fi
+
+if [ "$MODE" = ensure ]; then
+  # Crash-loop guard: if NanoClaw keeps dying right after we restart it, more
+  # restarts will not help. Back off and tell a human instead of looping forever.
+  ATTEMPTS="$NC/logs/.ensure-attempts"; SUSPEND_MARK="$NC/logs/.ensure-suspended"
+  NOW=$(date +%s)
+  RECENT=$(awk -v n="$NOW" '$1 > n - 1800' "$ATTEMPTS" 2>/dev/null)
+  COUNT=$(printf '%s' "$RECENT" | grep -c . || true)
+  if [ "$COUNT" -ge "$MAX_AUTO_RECOVERIES" ]; then
+    echo "  NanoClaw is down but $COUNT auto-recoveries already ran in the last 30 min — backing off."
+    if [ ! -f "$SUSPEND_MARK" ] || [ $((NOW - $(stat -c %Y "$SUSPEND_MARK"))) -gt 1800 ]; then
+      touch "$SUSPEND_MARK"
+      alert "NanoClaw keeps going down: $COUNT auto-restarts in 30 min, auto-restart SUSPENDED. Investigate: logs/nanoclaw.error.log and logs/recovery.log, then run recover-after-shutdown.sh by hand."
+    fi
+    exit 1
+  fi
+  printf '%s\n%s\n' "$RECENT" "$NOW" | grep . > "$ATTEMPTS"
+  ensure_report() {  # runs on every exit path once the guard has passed
+    local rc=$?
+    if [ -n "$(nanoclaw_pids)" ]; then
+      alert "NanoClaw was DOWN and has been auto-restarted (recovery exit $rc; warnings: $WARNINGS). Details: logs/recovery.log"
+    else
+      alert "NanoClaw is DOWN and the auto-restart FAILED (recovery exit $rc). Details: logs/recovery.log"
+    fi
+  }
+  trap ensure_report EXIT
 fi
 [ "$MODE" = check ] && echo "##### READ-ONLY CHECK — nothing will be changed #####"
 
