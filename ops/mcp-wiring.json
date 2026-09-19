@@ -1,0 +1,33 @@
+{
+  "description": "Declarative MCP wiring per agent group (keyed by group FOLDER). The live source of truth is container_configs in data/v2.db; this manifest lets recovery/initialisation re-apply it idempotently (ops/apply-mcp-wiring.ts). Applying only ADDS or UPDATES the listed servers — it never removes anything.",
+  "servers": {
+    "gmail": {
+      "config": {
+        "command": "/pnpm/gmail-mcp",
+        "args": [],
+        "env": {
+          "GMAIL_OAUTH_PATH": "/workspace/extra/gmail-mcp/gcp-oauth.keys.json",
+          "GMAIL_CREDENTIALS_PATH": "/workspace/extra/gmail-mcp/credentials.json"
+        }
+      },
+      "requiresMounts": [{ "hostPath": "/home/nanoclaw/.gmail-mcp", "containerPath": "gmail-mcp", "readonly": false }]
+    },
+    "israeli-bank": {
+      "config": { "type": "http", "url": "http://bank-mcp-server:3000/mcp" }
+    },
+    "calendar": {
+      "config": { "command": "bun", "args": ["/app/src/google-mcp/calendar.ts"], "env": {} }
+    },
+    "drive": {
+      "config": { "command": "bun", "args": ["/app/src/google-mcp/drive.ts"], "env": {} }
+    }
+  },
+  "groups": {
+    "main": ["gmail", "israeli-bank", "calendar", "drive"],
+    "home": ["gmail", "israeli-bank", "calendar", "drive"],
+    "eden": ["gmail", "israeli-bank"],
+    "telegram_kasem-bawari": ["gmail", "israeli-bank"],
+    "telegram_kasem-bawari-main": ["gmail", "israeli-bank"],
+    "telegram_kasem-bawari-aug26": ["gmail", "israeli-bank"]
+  }
+}

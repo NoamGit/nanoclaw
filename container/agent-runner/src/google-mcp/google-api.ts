@@ -65,6 +65,8 @@ export function describeError(status: number, bodyText: string): GoogleApiError 
     hint = ' OneCLI has no credential for this host — check that the Google app is connected and assigned to this agent.';
   } else if (reason === 'SERVICE_DISABLED' || reason === 'accessNotConfigured') {
     hint = ' The API is disabled for the Google Cloud project that owns the OAuth client — it must be enabled in the Cloud Console.';
+  } else if (status === 407) {
+    hint = ' The OneCLI proxy rejected this agent\'s credentials (proxy auth failed) — the agent may not be registered with OneCLI, or OneCLI is misconfigured.';
   } else if (status === 401) {
     hint = ' The Google connection in OneCLI looks expired or revoked — the owner needs to reconnect it in the OneCLI web UI.';
   } else if (status === 403) {
@@ -72,7 +74,8 @@ export function describeError(status: number, bodyText: string): GoogleApiError 
   } else if (status === 404) {
     hint = ' Not found — check the id (and that the connected account can see it).';
   }
-  return new GoogleApiError(`Google API ${status}${reason ? ` (${reason})` : ''}: ${message}.${hint}`, status, reason);
+  const detail = message ? `: ${message.replace(/\.$/, '')}` : '';
+  return new GoogleApiError(`Google API ${status}${reason ? ` (${reason})` : ''}${detail}.${hint}`, status, reason);
 }
 
 async function doFetch(url: string, init: RequestInit, fetchImpl: FetchLike): Promise<Response> {

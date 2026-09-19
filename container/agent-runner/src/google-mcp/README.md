@@ -26,6 +26,12 @@ is set; Drive is read-only; tool descriptions mark event/file text as untrusted 
 3. Each agent's OneCLI `secretMode` must be `all` (or have the app assigned).
 
 ## Wire into an agent group
+Wiring is declared in `ops/mcp-wiring.json` (per group folder) and applied idempotently by
+`ops/apply-mcp-wiring.ts` — `start-nanoclaw.sh` runs it on every start/recovery, so wiring survives a
+restored DB. Edit the manifest, then run `pnpm exec tsx ops/apply-mcp-wiring.ts` (add `--dry-run` to preview).
+Health check (real read-only call per service): `python3 ops/mcp-health.py`.
+
+Manual equivalent for a single group:
 ```bash
 GID=<agent-group-id>
 pnpm exec tsx scripts/q.ts data/v2.db "update container_configs set mcp_servers=json_set(json_set(mcp_servers,'\$.calendar',json('{\"command\":\"bun\",\"args\":[\"/app/src/google-mcp/calendar.ts\"],\"env\":{}}')),'\$.drive',json('{\"command\":\"bun\",\"args\":[\"/app/src/google-mcp/drive.ts\"],\"env\":{}}')), updated_at=datetime('now') where agent_group_id='$GID'"

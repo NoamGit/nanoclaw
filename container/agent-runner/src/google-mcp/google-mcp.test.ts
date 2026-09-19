@@ -33,6 +33,12 @@ describe('google-api', () => {
     expect(gateway.message).toContain('OneCLI has no credential');
   });
 
+  test('describeError explains a proxy auth failure (407) and empty bodies', () => {
+    const e = describeError(407, '');
+    expect(e.message).toContain('proxy rejected');
+    expect(e.message).not.toContain(': .');
+  });
+
   test('googleText stops reading past maxBytes', async () => {
     const big = 'a'.repeat(5000);
     const { fn } = fakeFetch(() => new Response(big));
