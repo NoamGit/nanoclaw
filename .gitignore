@@ -42,3 +42,4 @@ agents-sdk-docs
 
 # Runtime pid file written by start-nanoclaw.sh
 nanoclaw.pid
+__pycache__/
