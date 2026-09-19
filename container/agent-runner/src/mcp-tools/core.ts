@@ -131,6 +131,9 @@ export const sendMessage: McpToolDefinition = {
   },
 };
 
+/** Where send_file stages outbound attachments (bind-mounted from the host session dir). Overridable for tests. */
+const OUTBOX_ROOT = process.env.NANOCLAW_OUTBOX_DIR || '/workspace/outbox';
+
 export const sendFile: McpToolDefinition = {
   tool: {
     name: 'send_file',
@@ -159,9 +162,16 @@ export const sendFile: McpToolDefinition = {
     const id = generateId();
     const filename = (args.filename as string) || path.basename(resolvedPath);
 
-    const outboxDir = path.join('/workspace/outbox', id);
+    const outboxDir = path.join(OUTBOX_ROOT, id);
     fs.mkdirSync(outboxDir, { recursive: true });
-    fs.copyFileSync(resolvedPath, path.join(outboxDir, filename));
+    // Rootless Docker runs this process as a subuid the host user is not, so what we
+    // create here is owned by a uid the host cannot modify. The host must delete the
+    // directory after delivery (session-manager clearOutbox), which needs write access:
+    // open the dir (umask would leave it 755) and the copied file up explicitly.
+    fs.chmodSync(outboxDir, 0o777);
+    const dest = path.join(outboxDir, filename);
+    fs.copyFileSync(resolvedPath, dest);
+    fs.chmodSync(dest, 0o666);
 
     writeMessageOut({
       id,

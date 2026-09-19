@@ -135,19 +135,47 @@ export function resolveSession(
 /** Create the session folder and initialize both DBs. */
 export function initSessionFolder(agentGroupId: string, sessionId: string): void {
   const dir = sessionDir(agentGroupId, sessionId);
-  // 0o777: container writes journal files alongside the DBs; rootless Docker maps
-  // the container's node user to a different host UID, so world-write is required.
   fs.mkdirSync(dir, { recursive: true, mode: 0o777 });
-  fs.chmodSync(dir, 0o777); // recursive:true doesn't override existing dirs
-  const outboxDir = path.join(dir, 'outbox');
-  fs.mkdirSync(outboxDir, { recursive: true, mode: 0o777 });
-  fs.chmodSync(outboxDir, 0o777); // mkdirSync's mode is masked by umask; force world-write for the same reason as `dir` above
+  fs.mkdirSync(path.join(dir, 'outbox'), { recursive: true, mode: 0o777 });
 
   ensureSchema(inboundDbPath(agentGroupId, sessionId), 'inbound');
   ensureSchema(outboundDbPath(agentGroupId, sessionId), 'outbound');
-  // outbound.db is written by the container (runs as `node`, not root).
-  // Without 0o666 the container's node user gets SQLITE_READONLY under rootless Docker.
-  fs.chmodSync(outboundDbPath(agentGroupId, sessionId), 0o666);
+  ensureSessionPermissions(agentGroupId, sessionId);
+}
+
+/**
+ * World-write the session dir + outbox and open up outbound.db.
+ *
+ * Rootless Docker maps the container's user to a subuid that is neither the
+ * owner nor in the group of what the host created, so the container only gets
+ * access through the "other" bits: it writes journal files next to the DBs,
+ * creates outbox/<id>/ for send_file, and writes outbound.db (without 0o666 it
+ * gets SQLITE_READONLY). mkdirSync's `mode` is masked by the umask, hence the
+ * explicit chmods.
+ *
+ * Runs at creation AND on every container spawn: sessions created before this
+ * was applied (or by an older build) would otherwise keep their old modes forever
+ * and send_file would fail with EACCES. Never throws — a chmod we cannot do (file
+ * owned by the container's uid) must not prevent the container from starting.
+ */
+export function ensureSessionPermissions(agentGroupId: string, sessionId: string): void {
+  const dir = sessionDir(agentGroupId, sessionId);
+  if (!fs.existsSync(dir)) return;
+  const outboxDir = path.join(dir, 'outbox');
+  const attempt = (what: string, fn: () => void): void => {
+    try {
+      fn();
+    } catch (err) {
+      log.warn('Could not fix session permissions', { agentGroupId, sessionId, what, err });
+    }
+  };
+  attempt('session dir', () => fs.chmodSync(dir, 0o777));
+  attempt('outbox dir', () => {
+    fs.mkdirSync(outboxDir, { recursive: true, mode: 0o777 });
+    fs.chmodSync(outboxDir, 0o777);
+  });
+  const outboundDb = outboundDbPath(agentGroupId, sessionId);
+  if (fs.existsSync(outboundDb)) attempt('outbound.db', () => fs.chmodSync(outboundDb, 0o666));
 }
 
 /**

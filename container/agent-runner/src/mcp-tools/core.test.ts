@@ -10,7 +10,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { initTestSessionDb, closeSessionDb, getInboundDb } from '../db/connection.js';
 import { getUndeliveredMessages } from '../db/messages-out.js';
 import { setCurrentInReplyTo, clearCurrentInReplyTo } from '../current-batch.js';
-import { sendMessage } from './core.js';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { sendFile, sendMessage } from './core.js';
 
 beforeEach(() => {
   initTestSessionDb();
@@ -46,5 +50,34 @@ describe('send_message MCP tool — in_reply_to plumbing', () => {
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
     expect(out[0].in_reply_to).toBeNull();
+  });
+});
+
+describe('send_file MCP tool — outbox permissions (rootless Docker)', () => {
+  it('leaves the message dir and file writable by the host so post-delivery cleanup can delete them', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'outbox-test-'));
+    const src = path.join(root, 'photo.jpg');
+    fs.writeFileSync(src, 'data');
+    const prevUmask = process.umask(0o022); // the container's default: would make the dir 755
+    const prevEnv = process.env.NANOCLAW_OUTBOX_DIR;
+    process.env.NANOCLAW_OUTBOX_DIR = path.join(root, 'outbox');
+    fs.mkdirSync(process.env.NANOCLAW_OUTBOX_DIR);
+    try {
+      // OUTBOX_ROOT is read at import time, so re-import a fresh copy of the module.
+      const fresh = (await import(`./core.js?outbox=${Date.now()}`)) as { sendFile: typeof sendFile };
+      const res = await fresh.sendFile.handler({ to: 'peer', path: src, text: 'hi' });
+      expect(JSON.stringify(res)).toContain('File sent');
+
+      const [msgDir] = fs.readdirSync(process.env.NANOCLAW_OUTBOX_DIR);
+      const dirMode = fs.statSync(path.join(process.env.NANOCLAW_OUTBOX_DIR, msgDir)).mode & 0o777;
+      const fileMode = fs.statSync(path.join(process.env.NANOCLAW_OUTBOX_DIR, msgDir, 'photo.jpg')).mode & 0o777;
+      expect(dirMode).toBe(0o777);
+      expect(fileMode).toBe(0o666);
+    } finally {
+      process.umask(prevUmask);
+      if (prevEnv === undefined) delete process.env.NANOCLAW_OUTBOX_DIR;
+      else process.env.NANOCLAW_OUTBOX_DIR = prevEnv;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -22,6 +22,7 @@ import {
   writeSessionMessage,
   writeSessionRouting,
   initSessionFolder,
+  ensureSessionPermissions,
   sessionDir,
   inboundDbPath,
   outboundDbPath,
@@ -83,6 +84,43 @@ describe('session manager', () => {
       unknown_sender_policy: 'strict',
       created_at: now(),
     });
+  });
+
+  it('creates the outbox world-writable regardless of umask (rootless Docker needs the "other" bits)', () => {
+    const prev = process.umask(0o022);
+    try {
+      initSessionFolder('ag-1', 'sess-perm');
+    } finally {
+      process.umask(prev);
+    }
+    const dir = sessionDir('ag-1', 'sess-perm');
+    expect(fs.statSync(dir).mode & 0o777).toBe(0o777);
+    expect(fs.statSync(path.join(dir, 'outbox')).mode & 0o777).toBe(0o777);
+    expect(fs.statSync(outboundDbPath('ag-1', 'sess-perm')).mode & 0o777).toBe(0o666);
+  });
+
+  it('ensureSessionPermissions repairs a session created before the fix (775 outbox, 644 outbound.db)', () => {
+    initSessionFolder('ag-1', 'sess-old');
+    const dir = sessionDir('ag-1', 'sess-old');
+    fs.chmodSync(dir, 0o755);
+    fs.chmodSync(path.join(dir, 'outbox'), 0o775);
+    fs.chmodSync(outboundDbPath('ag-1', 'sess-old'), 0o644);
+
+    ensureSessionPermissions('ag-1', 'sess-old');
+
+    expect(fs.statSync(dir).mode & 0o777).toBe(0o777);
+    expect(fs.statSync(path.join(dir, 'outbox')).mode & 0o777).toBe(0o777);
+    expect(fs.statSync(outboundDbPath('ag-1', 'sess-old')).mode & 0o777).toBe(0o666);
+  });
+
+  it('ensureSessionPermissions recreates a missing outbox and tolerates a missing session', () => {
+    initSessionFolder('ag-1', 'sess-noout');
+    const outbox = path.join(sessionDir('ag-1', 'sess-noout'), 'outbox');
+    fs.rmSync(outbox, { recursive: true });
+    ensureSessionPermissions('ag-1', 'sess-noout');
+    expect(fs.statSync(outbox).mode & 0o777).toBe(0o777);
+
+    expect(() => ensureSessionPermissions('ag-1', 'does-not-exist')).not.toThrow();
   });
 
   it('should create session folder and both DBs', () => {

@@ -43,6 +43,7 @@ import {
   markContainerRunning,
   markContainerStopped,
   sessionDir,
+  ensureSessionPermissions,
   writeSessionRouting,
 } from './session-manager.js';
 import type { AgentGroup, Session } from './types.js';
@@ -120,6 +121,8 @@ async function spawnContainer(session: Session): Promise<void> {
     writeDestinations(agentGroup.id, session.id);
   }
   writeSessionRouting(agentGroup.id, session.id);
+  // Heal permissions on sessions created before world-write was enforced (rootless Docker).
+  ensureSessionPermissions(agentGroup.id, session.id);
 
   // Materialize container.json from DB — writes fresh file and returns
   // the config object, threaded through provider resolution, buildMounts,
