@@ -1,11 +1,125 @@
 {
-  "description": "OneCLI human-in-the-loop rules: the gateway HOLDS these requests until the owner approves in Telegram (handled by src/modules/approvals/onecli-approvals.ts). Applied idempotently by ops/apply-hitl-rules.py (start-nanoclaw.sh / recovery); adds or updates by rule name, never deletes. NOTE: the gateway only supports a trailing '*' in pathPattern (a '*' in the middle silently never matches), and Gmail calls use users/me.",
+  "description": "OneCLI human-in-the-loop rules: the gateway HOLDS these requests until the owner approves in Telegram (handled by src/modules/approvals/onecli-approvals.ts). Applied idempotently by ops/apply-hitl-rules.py (start-nanoclaw.sh / recovery); adds or updates by rule name, never deletes. NOTE: the gateway only supports a trailing '*' in pathPattern (a '*' in the middle silently never matches, so patterns are exact or end in '*'), and Gmail calls use users/me.",
   "rules": [
-    { "name": "HITL: Gmail send email",     "hostPattern": "gmail.googleapis.com", "pathPattern": "/gmail/v1/users/me/messages/send",        "method": "POST",   "action": "manual_approval", "enabled": true },
-    { "name": "HITL: Gmail send draft",     "hostPattern": "gmail.googleapis.com", "pathPattern": "/gmail/v1/users/me/drafts/send",          "method": "POST",   "action": "manual_approval", "enabled": true },
-    { "name": "HITL: Gmail delete message", "hostPattern": "gmail.googleapis.com", "pathPattern": "/gmail/v1/users/me/messages/*",           "method": "DELETE", "action": "manual_approval", "enabled": true },
-    { "name": "HITL: Gmail batch delete",   "hostPattern": "gmail.googleapis.com", "pathPattern": "/gmail/v1/users/me/messages/batchDelete", "method": "POST",   "action": "manual_approval", "enabled": true },
-    { "name": "HITL: Gmail delete thread",  "hostPattern": "gmail.googleapis.com", "pathPattern": "/gmail/v1/users/me/threads/*",            "method": "DELETE", "action": "manual_approval", "enabled": true },
-    { "name": "HITL: Drive delete file",    "hostPattern": "www.googleapis.com",   "pathPattern": "/drive/v3/files/*",                       "method": "DELETE", "action": "manual_approval", "enabled": true }
+    {
+      "name": "HITL: Gmail send email",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/messages/send",
+      "method": "POST",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Gmail send draft",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/drafts/send",
+      "method": "POST",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Gmail delete message",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/messages/*",
+      "method": "DELETE",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Gmail batch delete",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/messages/batchDelete",
+      "method": "POST",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Gmail delete thread",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/threads/*",
+      "method": "DELETE",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Drive delete file",
+      "hostPattern": "www.googleapis.com",
+      "pathPattern": "/drive/v3/files/*",
+      "method": "DELETE",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Calendar delete (events/calendars/ACL)",
+      "hostPattern": "www.googleapis.com",
+      "pathPattern": "/calendar/v3/calendars/*",
+      "method": "DELETE",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Calendar clear primary calendar",
+      "hostPattern": "www.googleapis.com",
+      "pathPattern": "/calendar/v3/calendars/primary/clear",
+      "method": "POST",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Calendar unsubscribe from calendar",
+      "hostPattern": "www.googleapis.com",
+      "pathPattern": "/calendar/v3/users/me/calendarList/*",
+      "method": "DELETE",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Gmail create filter",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/settings/filters",
+      "method": "POST",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Gmail add forwarding address",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/settings/forwardingAddresses",
+      "method": "POST",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Gmail change auto-forwarding",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/settings/autoForwarding",
+      "method": "PUT",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Gmail change auto-reply (vacation)",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/settings/vacation",
+      "method": "PUT",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Gmail add send-as alias",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/settings/sendAs",
+      "method": "POST",
+      "action": "manual_approval",
+      "enabled": true
+    },
+    {
+      "name": "HITL: Gmail add delegate",
+      "hostPattern": "gmail.googleapis.com",
+      "pathPattern": "/gmail/v1/users/me/settings/delegates",
+      "method": "POST",
+      "action": "manual_approval",
+      "enabled": true
+    }
   ]
 }
