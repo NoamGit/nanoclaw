@@ -1,0 +1,11 @@
+{
+  "description": "OneCLI human-in-the-loop rules: the gateway HOLDS these requests until the owner approves in Telegram (handled by src/modules/approvals/onecli-approvals.ts). Applied idempotently by ops/apply-hitl-rules.py (start-nanoclaw.sh / recovery); adds or updates by rule name, never deletes. NOTE: the gateway only supports a trailing '*' in pathPattern (a '*' in the middle silently never matches), and Gmail calls use users/me.",
+  "rules": [
+    { "name": "HITL: Gmail send email",     "hostPattern": "gmail.googleapis.com", "pathPattern": "/gmail/v1/users/me/messages/send",        "method": "POST",   "action": "manual_approval", "enabled": true },
+    { "name": "HITL: Gmail send draft",     "hostPattern": "gmail.googleapis.com", "pathPattern": "/gmail/v1/users/me/drafts/send",          "method": "POST",   "action": "manual_approval", "enabled": true },
+    { "name": "HITL: Gmail delete message", "hostPattern": "gmail.googleapis.com", "pathPattern": "/gmail/v1/users/me/messages/*",           "method": "DELETE", "action": "manual_approval", "enabled": true },
+    { "name": "HITL: Gmail batch delete",   "hostPattern": "gmail.googleapis.com", "pathPattern": "/gmail/v1/users/me/messages/batchDelete", "method": "POST",   "action": "manual_approval", "enabled": true },
+    { "name": "HITL: Gmail delete thread",  "hostPattern": "gmail.googleapis.com", "pathPattern": "/gmail/v1/users/me/threads/*",            "method": "DELETE", "action": "manual_approval", "enabled": true },
+    { "name": "HITL: Drive delete file",    "hostPattern": "www.googleapis.com",   "pathPattern": "/drive/v3/files/*",                       "method": "DELETE", "action": "manual_approval", "enabled": true }
+  ]
+}

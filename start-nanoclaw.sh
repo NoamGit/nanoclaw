@@ -3,7 +3,7 @@
 # Called by /home/nanoclaw/bin/recover-after-shutdown.sh; safe to run by hand.
 #
 #   1. stop any running instance (found by cwd + entrypoint, however it was started)
-#   2. apply ops/mcp-wiring.json to the DB (idempotent, non-fatal)
+#   2. apply ops/mcp-wiring.json to the DB and ops/hitl-rules.json to OneCLI (idempotent, non-fatal)
 #   3. start dist/index.js, write nanoclaw.pid
 #
 # To stop:  kill "$(cat /home/nanoclaw/nanoclaw-v2/nanoclaw.pid)"
@@ -45,6 +45,9 @@ fi
 
 echo "Applying MCP wiring..."
 "$ROOT/node_modules/.bin/tsx" ops/apply-mcp-wiring.ts || echo "WARNING: MCP wiring step failed (continuing)" >&2
+
+echo "Applying OneCLI human-approval rules..."
+python3 ops/apply-hitl-rules.py || echo "WARNING: HITL rules step failed (continuing)" >&2
 
 echo "Starting NanoClaw..."
 nohup "$NODE" "$ROOT/dist/index.js" \

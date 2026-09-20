@@ -188,6 +188,24 @@ else
   warn "OneCLI API not answering at $ONECLI_URL — agents cannot start without it"
 fi
 
+# Human-in-the-loop: the gateway HOLDS gated requests (Gmail send/delete, Drive delete) until
+# NanoClaw shows you an approval card. NanoClaw finds the gateway via ONECLI_GATEWAY_URL in .env
+# (else the URL the web app advertises, http://localhost:10255 — refused on this host). If it
+# cannot poll, held requests are silently denied after the TTL and no card ever arrives.
+GW_URL=$(grep -s '^ONECLI_GATEWAY_URL=' "$NC/.env" | cut -d= -f2-)
+[ -n "$GW_URL" ] || GW_URL=$(curl -s -m 5 "$ONECLI_URL/api/gateway-url" | python3 -c 'import sys,json; print(json.load(sys.stdin)["url"])' 2>/dev/null)
+curl -s -m 3 -o /dev/null "${GW_URL:-http://localhost:10255}/api/approvals/pending"; RC=$?
+# exit 28 = connected and the long-poll was held open (healthy); 0 = answered; anything else = unreachable
+if [ "$RC" = 0 ] || [ "$RC" = 28 ]; then
+  ok "approval channel reachable (${GW_URL})"
+else
+  warn "approval channel UNREACHABLE at ${GW_URL:-http://localhost:10255} (curl $RC) — approval cards would never arrive; set ONECLI_GATEWAY_URL in $NC/.env"
+fi
+python3 "$NC/ops/apply-hitl-rules.py" --check >/tmp/hitl-check.$$ 2>&1 \
+  && ok "human-approval rules in sync ($(grep -c ': ok' /tmp/hitl-check.$$) rules)" \
+  || { warn "human-approval rules missing/out of sync — re-apply with: python3 $NC/ops/apply-hitl-rules.py"; sed 's/^/    /' /tmp/hitl-check.$$; }
+rm -f /tmp/hitl-check.$$
+
 # ─── 6. Preflight for NanoClaw itself ───────────────────────────────────
 log "NanoClaw preflight"
 DB_OK=1
